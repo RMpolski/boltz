@@ -450,22 +450,19 @@ def compute_msa(
     click.echo(f"Calling MSA server for target {target_id} with {len(data)} sequences")
     click.echo(f"MSA server URL: {msa_server_url}")
     click.echo(f"MSA pairing strategy: {msa_pairing_strategy}")
-    
+
     # Construct auth headers if API key header/value is provided
     auth_headers = None
     if api_key_value:
         key = api_key_header if api_key_header else "X-API-Key"
         value = api_key_value
-        auth_headers = {
-            "Content-Type": "application/json",
-            key: value
-        }
+        auth_headers = {"Content-Type": "application/json", key: value}
         click.echo(f"Using API key authentication for MSA server (header: {key})")
     elif msa_server_username and msa_server_password:
         click.echo("Using basic authentication for MSA server")
     else:
         click.echo("No authentication provided for MSA server")
-    
+
     if len(data) > 1:
         paired_msas = run_mmseqs2(
             list(data.values()),
@@ -542,13 +539,16 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
     processed_mols_dir: Path,
     structure_dir: Path,
     records_dir: Path,
+    skip_conformer: Literal["regular", "coordinates", "basic_knowledge"] = "regular",
 ) -> None:
     try:
         # Parse data
         if path.suffix.lower() in (".fa", ".fas", ".fasta"):
             target = parse_fasta(path, ccd, mol_dir, boltz2)
         elif path.suffix.lower() in (".yml", ".yaml"):
-            target = parse_yaml(path, ccd, mol_dir, boltz2)
+            target = parse_yaml(
+                path, ccd, mol_dir, boltz2, skip_conformer=skip_conformer
+            )
         elif path.is_dir():
             msg = f"Found directory {path} instead of .fasta or .yaml, skipping."
             raise RuntimeError(msg)  # noqa: TRY301
@@ -677,6 +677,7 @@ def process_inputs(
     api_key_value: Optional[str] = None,
     boltz2: bool = False,
     preprocessing_threads: int = 1,
+    skip_conformer: Literal["regular", "coordinates", "basic_knowledge"] = "regular",
 ) -> Manifest:
     """Process the input data and output directory.
 
@@ -714,7 +715,7 @@ def process_inputs(
     # Validate mutually exclusive authentication methods
     has_basic_auth = msa_server_username and msa_server_password
     has_api_key = api_key_value is not None
-    
+
     if has_basic_auth and has_api_key:
         raise ValueError(
             "Cannot use both basic authentication (--msa_server_username/--msa_server_password) "
@@ -789,6 +790,7 @@ def process_inputs(
         processed_mols_dir=processed_mols_dir,
         structure_dir=structure_dir,
         records_dir=records_dir,
+        skip_conformer=skip_conformer,
     )
 
     # Parse input data
@@ -1077,6 +1079,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
     write_embeddings: bool = False,
+    skip_conformer: Literal["regular", "coordinates", "basic_knowledge"] = "regular",
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
@@ -1119,7 +1122,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             msa_server_password = os.environ.get("BOLTZ_MSA_PASSWORD")
         if api_key_value is None:
             api_key_value = os.environ.get("MSA_API_KEY_VALUE")
-        
+
         click.echo(f"MSA server enabled: {msa_server_url}")
         if api_key_value:
             click.echo("MSA server authentication: using API key header")
@@ -1174,6 +1177,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         boltz2=model == "boltz2",
         preprocessing_threads=preprocessing_threads,
         max_msa_seqs=max_msa_seqs,
+        skip_conformer=skip_conformer,
     )
 
     # Load manifest
@@ -1212,7 +1216,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     if (isinstance(devices, int) and devices > 1) or (
         isinstance(devices, list) and len(devices) > 1
     ):
-        start_method = "fork" if platform.system() != "win32" and platform.system() != "Windows" else "spawn"
+        start_method = (
+            "fork"
+            if platform.system() != "win32" and platform.system() != "Windows"
+            else "spawn"
+        )
         strategy = DDPStrategy(start_method=start_method)
         if len(filtered_manifest.records) < devices:
             msg = (
@@ -1387,7 +1395,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         steering_args.fk_steering = False
         steering_args.physical_guidance_update = False
         steering_args.contact_guidance_update = False
-        
+
         model_module = Boltz2.load_from_checkpoint(
             affinity_checkpoint,
             strict=True,

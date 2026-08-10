@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import click
 import numpy as np
@@ -20,7 +20,6 @@ from boltz.data import const
 from boltz.data.mol import load_molecules
 from boltz.data.parse.mmcif import parse_mmcif
 from boltz.data.parse.pdb import parse_pdb
-
 from boltz.data.types import (
     AffinityInfo,
     Atom,
@@ -197,7 +196,11 @@ def convert_atom_name(name: str) -> tuple[int, int, int, int]:
     return tuple(name)
 
 
-def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
+def compute_3d_conformer(
+    mol: Mol,
+    version: str = "v3",
+    skip: Literal["regular", "coordinates", "basic_knowledge"] = "regular",
+) -> bool:
     """Generate 3D coordinates using EKTDG method.
 
     Taken from `pdbeccdutils.core.component.Component`.
@@ -226,16 +229,51 @@ def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
     conf_id = -1
 
     try:
-        conf_id = AllChem.EmbedMolecule(mol, options)
+        if skip == "regular":
+            conf_id = AllChem.EmbedMolecule(mol, options)
 
-        if conf_id == -1:
+            if conf_id == -1:
+                print(
+                    f"WARNING: RDKit ETKDGv3 failed to generate a conformer for molecule "
+                    f"{Chem.MolToSmiles(AllChem.RemoveHs(mol))}, so the program will start with random coordinates. "
+                    f"Note that the performance of the model under this behaviour was not tested."
+                )
+                options.useRandomCoords = True
+                conf_id = AllChem.EmbedMolecule(mol, options)
+
+            if conf_id == -1:
+                print(
+                    "Still failed, trying conformer generation without basic knowledge."
+                    "Note that the performance of the model under this behaviour was not tested."
+                )
+                options.useBasicKnowledge = False
+                conf_id = AllChem.EmbedMolecule(mol, options)
+        elif skip == "coordinates":
             print(
-                f"WARNING: RDKit ETKDGv3 failed to generate a conformer for molecule "
-                f"{Chem.MolToSmiles(AllChem.RemoveHs(mol))}, so the program will start with random coordinates. "
+                f"You have selected to skip to using random coordinates for {Chem.MolToSmiles(AllChem.RemoveHs(mol))} "
                 f"Note that the performance of the model under this behaviour was not tested."
             )
             options.useRandomCoords = True
             conf_id = AllChem.EmbedMolecule(mol, options)
+
+            if conf_id == -1:
+                print(
+                    "Still failed, trying conformer generation without basic knowledge. "
+                    "Note that the performance of the model under this behaviour was not tested."
+                )
+                options.useBasicKnowledge = False
+                conf_id = AllChem.EmbedMolecule(mol, options)
+        elif skip == "basic_knowledge":
+            print(
+                "You chose to try conformer generation without basic knowledge for {Chem.MolToSmiles(AllChem.RemoveHs(mol))}. "
+                "Note that the performance of the model under this behaviour was not tested."
+            )
+            options.useBasicKnowledge = False
+            conf_id = AllChem.EmbedMolecule(mol, options)
+        else:
+            raise ValueError(
+                "Parameter 'skip' must be 'regular', 'coordinates', or 'basic_knowledge'"
+            )
 
         AllChem.UFFOptimizeMolecule(mol, confId=conf_id, maxIters=1000)
 
@@ -944,6 +982,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     ccd: Mapping[str, Mol],
     mol_dir: Optional[Path] = None,
     boltz_2: bool = False,
+    skip_conformer: Literal["regular", "coordinates", "basic_knowledge"] = "regular",
 ) -> Target:
     """Parse a Boltz input yaml / json.
 
@@ -1203,12 +1242,16 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
                     # Add error and warning messaging when computing affinity with ligands too large
                     if ref_mol.GetNumAtoms() > 128:
-                        msg = f"The ligand for affinity is too large, ligands with more than 128 atoms are not " \
-                              f"supported in the affinity prediction module"
+                        msg = (
+                            f"The ligand for affinity is too large, ligands with more than 128 atoms are not "
+                            f"supported in the affinity prediction module"
+                        )
                         raise ValueError(msg)
                     elif ref_mol.GetNumAtoms() > 56:
-                        print("WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, which "
-                              "was the maximum during training, therefore the affinity output might be inaccurate.")
+                        print(
+                            "WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, which "
+                            "was the maximum during training, therefore the affinity output might be inaccurate."
+                        )
 
                 # Parse residue
                 residue = parse_ccd_residue(
@@ -1255,7 +1298,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     raise ValueError(msg)
                 atom.SetProp("name", atom_name)
 
-            success = compute_3d_conformer(mol)
+            success = compute_3d_conformer(mol, skip=skip_conformer)
             if not success:
                 msg = f"Failed to compute 3D conformer for {seq}"
                 raise ValueError(msg)
@@ -1268,8 +1311,10 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     msg = f"The ligand for affinity is too large, ligands with more than 128 atoms are not supported in the affinity prediction module"
                     raise ValueError(msg)
                 elif mol_no_h.GetNumAtoms() > 56:
-                    print("WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, "
-                          "which was the maximum during training, therefore the affinity output might be inaccurate.")
+                    print(
+                        "WARNING: the ligand used for affinity calculation is larger than 56 heavy-atoms, "
+                        "which was the maximum during training, therefore the affinity output might be inaccurate."
+                    )
 
             affinity_mw = AllChem.Descriptors.MolWt(mol_no_h) if affinity else None
             extra_mols[f"LIG{ligand_id}"] = mol_no_h
@@ -1630,20 +1675,16 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         if template_chain_ids is not None and not isinstance(template_chain_ids, list):
             template_chain_ids = [template_chain_ids]
 
-        if (
-            template_chain_ids is not None
-            and chain_ids is not None
-        ):
-           
-                if len(template_chain_ids) == len(chain_ids):
-                     if len(template_chain_ids) > 0 and len(chain_ids) > 0:
-                        matched = True
-                else:
-                    msg = (
-                        "When providing both the chain_id and template_id, the number of"
-                        "template_ids provided must match the number of chain_ids!"
-                    )
-                    raise ValueError(msg)
+        if template_chain_ids is not None and chain_ids is not None:
+            if len(template_chain_ids) == len(chain_ids):
+                if len(template_chain_ids) > 0 and len(chain_ids) > 0:
+                    matched = True
+            else:
+                msg = (
+                    "When providing both the chain_id and template_id, the number of"
+                    "template_ids provided must match the number of chain_ids!"
+                )
+                raise ValueError(msg)
 
         # Get relevant chains ids
         if chain_ids is None:
