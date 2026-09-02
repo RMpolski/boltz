@@ -674,7 +674,6 @@ def process_inputs(
     api_key_value: Optional[str] = None,
     boltz2: bool = False,
     preprocessing_threads: int = 1,
-    skip_conformer: Literal["regular", "coordinates", "basic_knowledge"] = "regular",
 ) -> Manifest:
     """Process the input data and output directory.
 
@@ -787,7 +786,6 @@ def process_inputs(
         processed_mols_dir=processed_mols_dir,
         structure_dir=structure_dir,
         records_dir=records_dir,
-        skip_conformer=skip_conformer,
     )
 
     # Parse input data
@@ -1076,7 +1074,6 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
     write_embeddings: bool = False,
-    skip_conformer: Literal["regular", "coordinates", "basic_knowledge"] = "regular",
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
@@ -1174,7 +1171,6 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         boltz2=model == "boltz2",
         preprocessing_threads=preprocessing_threads,
         max_msa_seqs=max_msa_seqs,
-        skip_conformer=skip_conformer,
     )
 
     # Load manifest
