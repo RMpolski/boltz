@@ -539,16 +539,13 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
     processed_mols_dir: Path,
     structure_dir: Path,
     records_dir: Path,
-    skip_conformer: Literal["regular", "coordinates", "basic_knowledge"] = "regular",
 ) -> None:
     try:
         # Parse data
         if path.suffix.lower() in (".fa", ".fas", ".fasta"):
             target = parse_fasta(path, ccd, mol_dir, boltz2)
         elif path.suffix.lower() in (".yml", ".yaml"):
-            target = parse_yaml(
-                path, ccd, mol_dir, boltz2, skip_conformer=skip_conformer
-            )
+            target = parse_yaml(path, ccd, mol_dir, boltz2)
         elif path.is_dir():
             msg = f"Found directory {path} instead of .fasta or .yaml, skipping."
             raise RuntimeError(msg)  # noqa: TRY301
