@@ -656,6 +656,7 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
 
         traceback.print_exc()
         print(f"Failed to process {path}. Skipping. Error: {e}.")  # noqa: T201
+        raise e  # We want to handle exceptions on our side
 
 
 @rank_zero_only
